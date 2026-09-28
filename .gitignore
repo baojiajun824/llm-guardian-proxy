@@ -1,0 +1,11 @@
+.env
+.venv/
+.venv-guardian/
+.vllm-src/
+.uv-cache/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+certs/*
+!certs/.gitkeep

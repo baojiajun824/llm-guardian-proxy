@@ -1,0 +1,75 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - proxy
+
+  proxy:
+    build: ./proxy
+    environment:
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL:-http://ollama:11434}
+      GUARDIAN_BASE_URL: ${GUARDIAN_BASE_URL:-http://host.docker.internal:8001/v1}
+      GUARDIAN_MODEL: ${GUARDIAN_MODEL:-ibm-granite/granite-guardian-3.1-2b}
+      GUARDIAN_API_KEY: ${GUARDIAN_API_KEY:-unused}
+      GUARDIAN_RISK_THRESHOLD: ${GUARDIAN_RISK_THRESHOLD:-0.5}
+      GUARDIAN_TIMEOUT_SECONDS: ${GUARDIAN_TIMEOUT_SECONDS:-30}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+
+  ollama:
+    image: ollama/ollama:0.11.10
+    volumes:
+      - ollama-data:/root/.ollama
+
+  ollama-init:
+    image: ollama/ollama:0.11.10
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        if [ "$${UPSTREAM_BASE_URL}" = "http://ollama:11434" ]; then
+          until ollama list >/dev/null 2>&1; do sleep 1; done;
+          ollama pull "$${UPSTREAM_MODEL}";
+        else
+          echo "Skipping local model download for remote upstream";
+        fi
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL:-http://ollama:11434}
+      UPSTREAM_MODEL: ${UPSTREAM_MODEL:-qwen2.5:0.5b}
+    depends_on:
+      - ollama
+
+  guardian-nvidia:
+    image: vllm/vllm-openai:v0.10.1.1
+    profiles: ["nvidia"]
+    command:
+      - --model
+      - ${GUARDIAN_MODEL:-ibm-granite/granite-guardian-3.1-2b}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+    ports:
+      - "8001:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  ollama-data:
+  huggingface-cache:
